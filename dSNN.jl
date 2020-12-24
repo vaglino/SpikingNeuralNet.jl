@@ -1,5 +1,5 @@
 using LinearAlgebra, SparseArrays, LightGraphs
-using Plots,GraphRecipes
+using Plots, GraphRecipes
 
 ## Graph construction
 
@@ -41,8 +41,12 @@ function check_arrival(spk)
     arrived = (spk .≈ len) .* adj
 end
 
-function synapse_integration(W, x, thresh)
-    ŷ = activation.( vec(sum( W .* x , dims = 1)), threshold = thresh )
+function synapse_integration(ΣV, W, x, thresh)
+    ΣWx = vec(sum( W .* x , dims = 1))
+    ΣV = ΣV * leak + ΣWx
+    ŷ = activation.(ΣV, threshold = thresh )
+
+    return ŷ, ΣV
 end
 
 function activation(y; threshold=0.5)
@@ -63,10 +67,45 @@ function delete_finished_spike(spk,arrived)
     return spk
 end
 
+function  delete_exc_voltage(ΣV, exc_mask)
+    ΣV[exc_mask] .= 0.
+    return ΣV
+end
+
+# function run_inference(spk; maxiters = 100)
+#     firing_count = []
+#     excited_id = []
+#     ΣV = zeros(size(spk,2))
+#     for i in 1:maxiters
+#         if i == 4
+#             @show i
+#         end
+#         n_firing = sum(spk .!= 0)
+#
+#         arrived = check_arrival(spk)
+#
+#         exc_mask, ΣV = synapse_integration(ΣV, W, arrived, thresh)
+#
+#         new_spikes = update_spikes(spk,exc_mask)
+#
+#         spk = delete_finished_spike(spk,arrived)
+#         ΣV = delete_exc_voltage(ΣV, exc_mask)
+#
+#         spk = take_step(spk) + new_spikes*stepsize
+#
+#         push!(firing_count, n_firing)
+#         push!(excited_id, exc_mask)
+#         if sum(exc_mask)==0. && n_firing == 0.
+#             break
+#         end
+#     end
+#     return firing_count, excited_id
+# end
+
 function run_inference(spk; maxiters = 100)
     firing_count = []
     excited_id = []
-
+    ΣV = zeros(size(spk,2))
     for i in 1:maxiters
         if i == 4
             @show i
@@ -75,22 +114,47 @@ function run_inference(spk; maxiters = 100)
 
         arrived = check_arrival(spk)
 
-        exc_mask = synapse_integration(W, arrived, thresh)
+        exc_mask, ΣV = synapse_integration(ΣV, W, arrived, thresh)
 
         new_spikes = update_spikes(spk,exc_mask)
 
         spk = delete_finished_spike(spk,arrived)
+        ΣV = delete_exc_voltage(ΣV, exc_mask)
 
         spk = take_step(spk) + new_spikes*stepsize
 
         push!(firing_count, n_firing)
         push!(excited_id, exc_mask)
+        if sum(exc_mask)==0. && n_firing == 0.
+            break
+        end
     end
     return firing_count, excited_id
 end
 
-## loss function
 
+function plot_results()
+    p1 =  plot(ncnt)
+
+    a = reduce(hcat,id_excited)
+    a = Float64.(a)
+    p2 = heatmap(a,seriescolor=:binary)
+
+    hist = sum(a,dims=2)
+    p3 = histogram(hist,bins=25)
+
+    plot(p1, p2, layout=(1,2))
+end
+
+
+
+## loss function
+function loss(id_excited)
+    a = reduce(hcat,id_excited)
+    a = Float64.(a)
+    # sum(a[end-9:end],dims=2) ./ size(a,2)
+    sum(a[end-9:end,:],dims=2) ./ size(a,2)
+end
 # get inference results, calculate loss
 
 ## Input handling
@@ -99,4 +163,4 @@ end
 
 ## Training loop
 
-# 
+#
