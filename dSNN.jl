@@ -34,7 +34,7 @@ end
 
 function take_step(spk)
     spk_mask = spk .!= 0 # find where there is a spike
-    spk += spk_mask * stepsize # advance by one step
+    spk += spk_mask * t_step*vmax # advance by one step
 end
 
 function check_arrival(spk)
@@ -72,6 +72,56 @@ function  delete_exc_voltage(ΣV, exc_mask)
     return ΣV
 end
 
+function excite_inputs(spk,t,Λs)
+    # inputs neurons that are excited at this time step
+    excited = mod.(t,Λs) .== 0.0
+
+    already_spiking = spk[1:n_inputs,:] .!= 0
+
+    # if any input neuron is already firing, don't excite again
+    new_spikes = adj[1:n_inputs,:] .* .!already_spiking .* excited
+    spk[1:n_inputs,:] .+= new_spikes * t_step*vmax
+    return spk, excited
+end
+
+
+function run_inference(spk; maxiters = 100)
+    firing_count = []
+    excited_id = []
+    ΣV = zeros(size(spk,2))
+    for t in t_step:t_step:t_max
+        if t == 4
+            @show t
+        end
+
+        spk, exc_inputs_mask = excite_inputs(spk,t,Λs)
+
+        n_firing = sum(spk .!= 0)
+
+        arrived = check_arrival(spk)
+
+        exc_mask, ΣV = synapse_integration(ΣV, W, arrived, thresh)
+
+        new_spikes = update_spikes(spk,exc_mask)
+
+        spk = delete_finished_spike(spk,arrived)
+        ΣV = delete_exc_voltage(ΣV, exc_mask)
+
+        spk = take_step(spk) + new_spikes*t_step*vmax
+
+        push!(firing_count, n_firing)
+        excited_neurons = vcat(exc_inputs_mask, exc_mask[n_inputs+1:end])
+        push!(excited_id, excited_neurons)
+        if sum(exc_mask)==0. && n_firing == 0. && t != t_step
+            break
+        end
+    end
+    return firing_count, excited_id
+end
+
+
+
+# get inference results, calculate loss
 # function run_inference(spk; maxiters = 100)
 #     firing_count = []
 #     excited_id = []
@@ -101,63 +151,6 @@ end
 #     end
 #     return firing_count, excited_id
 # end
-
-function run_inference(spk; maxiters = 100)
-    firing_count = []
-    excited_id = []
-    ΣV = zeros(size(spk,2))
-    for i in 1:maxiters
-        if i == 4
-            @show i
-        end
-        n_firing = sum(spk .!= 0)
-
-        arrived = check_arrival(spk)
-
-        exc_mask, ΣV = synapse_integration(ΣV, W, arrived, thresh)
-
-        new_spikes = update_spikes(spk,exc_mask)
-
-        spk = delete_finished_spike(spk,arrived)
-        ΣV = delete_exc_voltage(ΣV, exc_mask)
-
-        spk = take_step(spk) + new_spikes*stepsize
-
-        push!(firing_count, n_firing)
-        push!(excited_id, exc_mask)
-        if sum(exc_mask)==0. && n_firing == 0.
-            break
-        end
-    end
-    return firing_count, excited_id
-end
-
-
-function plot_results()
-    p1 =  plot(ncnt)
-
-    a = reduce(hcat,id_excited)
-    a = Float64.(a)
-    p2 = heatmap(a,seriescolor=:binary)
-
-    hist = sum(a,dims=2)
-    p3 = histogram(hist,bins=25)
-
-    plot(p1, p2, layout=(1,2))
-end
-
-
-
-## loss function
-function loss(id_excited)
-    a = reduce(hcat,id_excited)
-    a = Float64.(a)
-    # sum(a[end-9:end],dims=2) ./ size(a,2)
-    sum(a[end-9:end,:],dims=2) ./ size(a,2)
-end
-# get inference results, calculate loss
-
-## Input handling
 
 # transform input format into spike train
 
